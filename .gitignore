@@ -128,3 +128,4 @@ dmypy.json
 # Pyre type checker
 .pyre/
 /备用脚本
+/AoE2SP 触发克隆工具.exe

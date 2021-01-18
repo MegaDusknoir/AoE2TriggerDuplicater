@@ -10,6 +10,7 @@ A packed GUI python tool based on [AoE2ScenarioParser](https://github.com/KSneij
 触发 (Trigger)：  
 --------------------  
 * 查看触发列表  
+* 查看单个触发
 * 复制到所有玩家 / 对其他玩家删除  
 * 批量移动触发  
 * 重新排序触发  

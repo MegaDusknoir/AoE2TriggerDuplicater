@@ -4,6 +4,7 @@ import tkinter.ttk
 import tkinter.messagebox
 import base64
 import copy
+from typing import List
 from aoespicon import img
 from AoE2ScenarioParser.aoe2_scenario import AoE2Scenario
 from AoE2ScenarioParser.datasets.conditions import Condition
@@ -29,8 +30,39 @@ global unit_manager
 global tid
 global uid
 global openfile
+global duplicate_config_string
+global duplicate_config
+
+class DuplicateConfig:
+    def __init__(self,
+                 text_config: List[List[str]],
+				 location_config: List[List[List[int]]]
+                 ):
+
+        self.text_config = text_config
+        self.location_config = location_config
 
 openfile = ""
+duplicate_config = DuplicateConfig([],[])
+duplicate_config_string = """【方括号标头 + 8 个坐标，若匹配首个坐标，会被复制成其他 7 个坐标】
+0,0
+0,0
+0,0
+0,0
+0,0
+0,0
+0,0
+0,0
+【方括号标头 + 字符串，若匹配到首个字符串，会被复制成其他 7 个字符串】
+<BLUE>
+<RED>
+<GREEN>
+<YELLOW>
+<AQUA>
+<PURPLE>
+<GREY>
+<ORANGE>
+"""
 current_index = 0
 
 def open_scen():
@@ -43,7 +75,7 @@ def open_scen():
 	open_success = False
 	while open_success == False:
 		openfile_t = askopenfilename(title='选择 AoE2 DE 场景文件', filetypes=[('决定版场景', '*.aoe2scenario'), ('所有文件', '*')])
-		if (openfile_t.strip() == "") & (openfile.strip() != ""):
+		if openfile_t.strip() == "" and openfile.strip() != "":
 			# 未选择文件，非首次打开 => 放弃操作
 			return 0
 		else:
@@ -84,7 +116,7 @@ def open_scen():
 def trigger_relist():
 	global trigger_manager
 	global current_index
-	if (current_index == 0) | (current_index == 1):
+	if current_index == 0 or current_index == 1:
 		# 拉取触发列表
 		t_Duplicater.config(state='normal')
 		t_Duplicater.delete(1.0,tk.END)
@@ -129,6 +161,121 @@ def saveas_scen():
 # 另存为场景（快捷键）
 def saveas_scen_handle(event):
 	saveas_scen()
+	
+def copy_trigger_per_player_fix(trigger_obj: TriggersObject,
+								from_player,
+								trigger_select,
+								change_from_player_only=False,
+								include_player_source=True,
+								include_player_target=False,
+								trigger_ce_lock=None,
+								include_gaia: bool = False,
+								create_copy_for_players: List[IntEnum] = None) -> Dict[Player, TriggerObject]:
+	"""
+	Copies a trigger for all or a selection of players. Every copy will change desired player attributes with it.
+
+	Args:
+		from_player (IntEnum): The central player this trigger is created for. This is the player that will not get
+			a copy.
+		trigger_select (TriggerSelect): An object used to identify which trigger to select.
+		change_from_player_only (bool): If set to True, only change player attributes in effects and conditions that
+			are equal to the player defined using the `from_player` parameter.
+		include_player_source (bool): If set to True, allow player source attributes to be changed while copying.
+			Player source attributes are attributes where a player is defined to perform an action such as create an
+			object. If set to False these attributes will remain unchanged.
+		include_player_target (bool): If set to True, allow player target attributes to be changed while copying.
+			Player target attributes are attributes where a player is defined as the target such as change ownership
+			or sending resources. If set to False these attributes will remain unchanged.
+		trigger_ce_lock (TriggerCELock): The TriggerCELock object. Used to lock certain (types) of conditions or
+			effects from being changed while copying.
+		include_gaia (bool): If True, GAIA is included in the copied list. (Also when `create_copy_for_players` is
+			defined)
+		create_copy_for_players (List[IntEnum]): A list of Players to create a copy for. The `from_player` will be
+			excluded from this list.
+
+	Returns:
+		A dict with all the new created triggers. The key is the player for which the trigger is
+			created using the IntEnum associated with it. Example:
+			{Player.TWO: TriggerObject, Player.FIVE: TriggerObject}
+
+	Raises:
+		ValueError: if more than one trigger selection is used. Any of (trigger_index, display_index or trigger)
+			Or if Both `include_player_source` and `include_player_target` are `False`
+
+	:Authors:
+		KSneijders
+
+	"""
+	trigger_index, display_index, trigger = trigger_obj._validate_and_retrieve_trigger_info(trigger_select)
+	if not include_player_source and not include_player_target:
+		raise ValueError("Cannot exclude player source and target.")
+
+	if create_copy_for_players is None:
+		create_copy_for_players = [
+			Player.ONE, Player.TWO, Player.THREE, Player.FOUR,
+			Player.FIVE, Player.SIX, Player.SEVEN, Player.EIGHT
+		]
+	if include_gaia and Player.GAIA not in create_copy_for_players:
+		create_copy_for_players.append(Player.GAIA)
+
+	alter_conditions, alter_effects = TriggersObject._find_alterable_ce(trigger, trigger_ce_lock)
+
+	return_dict: Dict[Player, TriggerObject] = {}
+	for player in create_copy_for_players:
+		if not player == from_player:
+			new_trigger = trigger_obj.copy_trigger(TS.trigger(trigger))
+			if new_trigger.name.endswith(" (copy)"):
+				new_trigger.name = new_trigger.name[:-7]
+			new_trigger.name += f" (p{player})"
+			return_dict[player] = new_trigger
+
+			for cond_x in alter_conditions:
+				cond = new_trigger.conditions[cond_x]
+				# Player not set
+				if cond.source_player == -1:
+					continue
+				# Player not equal to 'from_player'
+				if change_from_player_only:
+					if not cond.source_player == from_player:
+						continue
+				# Change source player
+				if include_player_source:
+					cond.source_player = Player(player)
+				# Change target player
+				if include_player_target:
+					cond.target_player = Player(player)
+			for effect_x in alter_effects:
+				effect = new_trigger.effects[effect_x]
+				# Player not set
+				if effect.source_player == -1:
+					continue
+				# Player not equal to 'from_player'
+				if change_from_player_only:
+					if not effect.source_player == from_player:
+						continue
+				# Change source player
+				if include_player_source:
+					effect.source_player = Player(player)
+				# Change target player
+				if include_player_target:
+					effect.target_player = Player(player)
+				for location in duplicate_config.location_config:
+					if location[1][0] == effect.area_1_x and location[1][1] == effect.area_1_y:
+						effect.area_1_x = location[player][0]
+						effect.area_1_y = location[player][1]
+				for location in duplicate_config.location_config:
+					if location[1][0] == effect.area_2_x and location[1][1] == effect.area_2_y:
+						effect.area_2_x = location[player][0]
+						effect.area_2_y = location[player][1]
+				for location in duplicate_config.location_config:
+					if location[1][0] == effect.location_x and location[1][1] == effect.location_y:
+						effect.location_x = location[player][0]
+						effect.location_y = location[player][1]
+				for text in duplicate_config.text_config:
+					if effect.message.find(text[1]) > 0:
+						effect.message.replace(text[1], text[player])
+
+	return return_dict
 
 # 触发多人复制
 def duplicate():
@@ -143,10 +290,11 @@ def duplicate():
 		tid.set("")
 		return
 	try:
-		copied_triggers = trigger_manager.copy_trigger_per_player(
+		copied_triggers = copy_trigger_per_player_fix(
+		trigger_obj = trigger_manager,
 		from_player = 1,
-        change_from_player_only = frm_plyr_only.get(),
-        include_player_source = src_plyr.get(),
+		change_from_player_only = frm_plyr_only.get(),
+		include_player_source = src_plyr.get(),
 		include_player_target = tgt_plyr.get(),
 		trigger_select = TriggerSelect.display(idtmp),
 		create_copy_for_players = [1,2,3,4,5,6,7,8]
@@ -239,7 +387,7 @@ def trigger_move_handle():
 		tk.messagebox.showerror(title='触发 ID 不正确', message='无效的触发范围。')
 		return
 	# 目标位置检查
-	if (tgt >= begin) & (tgt <= end + 1) | tgt > len(trigger_manager.trigger_display_order):
+	if tgt >= begin and tgt <= end + 1 or tgt > len(trigger_manager.trigger_display_order):
 		tk.messagebox.showerror(title='触发 ID 不正确', message='无效的目标位置。')
 		return
 	if tgt > end + 1:
@@ -299,39 +447,159 @@ def dup_switch_handle():
 		b_dup.place(x=280, y=10)
 		
 def player_check():
-	if (src_plyr.get() == False) & (tgt_plyr.get() == False):
+	if src_plyr.get() == False and tgt_plyr.get() == False:
 		tk.messagebox.showerror(title='参数不允许', message='必须转换起始玩家或目标玩家中的一个以上。')
 		src_plyr.set(True)
+				
+def trigger_detail_handle():
+	global tid
+	global trigger_manager
+	try:
+		trigger_id = int(tid.get())
+	except:
+		tk.messagebox.showerror(title='参数不正确', message='参数输入错误，无法识别为整数。')
+		print("\n"
+		"参数输入错误，无法识别为整数。\n")
+		tid.set("")
+		return
+	try:
+		trigger_detail = trigger_manager.get_trigger_as_string(trigger_select = TriggerSelect.display(trigger_id))
+	except:
+		tk.messagebox.showerror(title='触发 ID 不正确', message='触发不存在。')
+		tid.set("")
+		return
+	w_trigger_detail=tk.Toplevel(master=window)
+	w_trigger_detail.title(f'触发 {trigger_id}')
+	icotmp = open("_tmp.ico","wb+")
+	icotmp.write(base64.b64decode(img))
+	icotmp.close()
+	w_trigger_detail.iconbitmap("_tmp.ico")
+	w_trigger_detail.geometry('640x480')
+	w_trigger_detail.resizable(width=False, height=False)
+	os.remove("_tmp.ico")
+
+	t_TriggerDetail = tk.scrolledtext.ScrolledText(w_trigger_detail, width=80, height=32)
+	t_TriggerDetail.pack()
+	t_TriggerDetail.delete(1.0,tk.END)
+	t_TriggerDetail.insert(tk.END, trigger_detail)
+	t_TriggerDetail.config(state='disabled')
+	
+	def unit_edit_commit_handle():
+		w_trigger_detail.quit()
+		w_trigger_detail.destroy()
+
+	b_commit = tk.Button(w_trigger_detail, text='关闭', width=18, height=1, command=unit_edit_commit_handle)
+	b_commit.pack(anchor = 's')
+	
+	w_trigger_detail.grab_set()
+	w_trigger_detail.mainloop()
+
+def duplicate_config_handle():
+	global duplicate_config_string
+	global duplicate_config
+	w_dup_cfg=tk.Toplevel(master=window)
+	w_dup_cfg.title(f'配置复杂复制')
+	icotmp = open("_tmp.ico","wb+")
+	icotmp.write(base64.b64decode(img))
+	icotmp.close()
+	w_dup_cfg.iconbitmap("_tmp.ico")
+	w_dup_cfg.geometry('640x480')
+	w_dup_cfg.resizable(width=False, height=False)
+	os.remove("_tmp.ico")
+
+	t_Configedit = tk.scrolledtext.ScrolledText(w_dup_cfg, width=50, height=28)
+	t_Configedit.pack()
+	
+	def config_commit_handle():
+		global duplicate_config_string
+		config_string = t_Configedit.get(1.0,tk.END)
+		duplicate_config.text_config.clear()
+		duplicate_config.location_config.clear()
+		while True:
+			try:
+				config_group = config_string.split('【')
+				for config_member in config_group:
+					if config_member.strip() != "":
+						config_list = config_member.split('\n')
+						config_list[0] = '【' + config_list[0]
+						if config_member.count(',') == 8:
+							config_line_int = []
+							config_line_int.append(config_list[0])
+							for line in range(1,9):
+								config_line_int.append(list(map(int,config_list[line].split(','))))
+							duplicate_config.location_config.append(config_line_int)
+						else:
+							while len(config_list) > 9:
+								config_list.pop()
+							duplicate_config.text_config.append(config_list)
+				break
+			except:
+				result = tk.messagebox.askokcancel(title='提交失败', message='格式可能不正确，是否放弃编辑？', parent=w_dup_cfg)
+				if result == True:
+					w_dup_cfg.quit()
+					w_dup_cfg.destroy()
+				return
+		duplicate_config_string = ""
+		for text in duplicate_config.text_config:
+			for i in range(0,9):
+				duplicate_config_string += text[i] + '\n'
+		for location in duplicate_config.location_config:
+			duplicate_config_string += location[0] + '\n'
+			for i in range(1,9):
+				duplicate_config_string += f'{location[i][0]},{location[i][1]}' + '\n'
+
+		w_dup_cfg.quit()
+		w_dup_cfg.destroy()
+
+	b_commit = tk.Button(w_dup_cfg, text='提交配置', width=16, height=1, command=config_commit_handle)
+	b_commit.place(x=200, y=400)
+
+	def config_saveas_handle():
+		tk.messagebox.showinfo(title='鸽了！', message='这个功能还没有做，还是直接动手复制来的快罢。', parent=w_dup_cfg)
+
+	b_saveas = tk.Button(w_dup_cfg, text='另存为', width=16, height=1, command=config_saveas_handle)
+	b_saveas.place(x=340, y=400)
+	
+	t_Configedit.delete(1.0,tk.END)
+	t_Configedit.insert(tk.END, duplicate_config_string)
+	w_dup_cfg.grab_set()
+	w_dup_cfg.mainloop()
 
 # 文本框
 t_Duplicater = tk.scrolledtext.ScrolledText(f_Duplicater, width=140, height=36)
-t_Duplicater.place(x=100, y=60)
+t_Duplicater.place(x=160, y=60)
 t_Duplicater.config(state='disabled')
 
 tid = tk.StringVar()
 e = tk.Entry(f_Duplicater, textvariable = tid, width = 12)
-e.place(x=155, y=14)
+e.place(x=215, y=14)
 
 # 输入框
 dis_begin = tk.StringVar()
 e_dis_begin = tk.Entry(f_Duplicater, textvariable = dis_begin, width = 10)
-e_dis_begin.place(x=670, y=5)
+e_dis_begin.place(x=730, y=5)
 dis_end = tk.StringVar()
 e_dis_end = tk.Entry(f_Duplicater, textvariable = dis_end, width = 10)
-e_dis_end.place(x=770, y=5)
+e_dis_end.place(x=830, y=5)
 dis_tgt = tk.StringVar()
 e_dis_tgt = tk.Entry(f_Duplicater, textvariable = dis_tgt, width = 10)
-e_dis_tgt.place(x=670, y=30)
+e_dis_tgt.place(x=730, y=30)
 
 # 按钮
 b_dup = tk.Button(f_Duplicater, text='复制到所有玩家', width=14, height=1, command=duplicate)
-b_dup.place(x=280, y=10)
+b_dup.place(x=340, y=10)
 
 b_reo = tk.Button(f_Duplicater, text='以显示序重排ID (测试)', width=18, height=1, command=reorder)
-b_reo.place(x=960, y=10)
+b_reo.place(x=1020, y=10)
 
 b_mov = tk.Button(f_Duplicater, text='以显示序移动', width=12, height=1, command=trigger_move_handle, font=('', 8))
-b_mov.place(x=765, y=30)
+b_mov.place(x=825, y=30)
+
+b_chk = tk.Button(f_Duplicater, text='查看触发内容', width=14, height=1, command=trigger_detail_handle)
+b_chk.place(x=20, y=10)
+
+b_cfg = tk.Button(f_Duplicater, text='配置复杂复制', width=14, height=1, command=duplicate_config_handle)
+b_cfg.place(x=20, y=60)
 
 # 变量
 reo_auto = tk.IntVar()
@@ -345,28 +613,28 @@ dup_switch.set(False)
 
 # 选框
 c_reo_auto = tk.Checkbutton(f_Duplicater, text='自动',variable=reo_auto, onvalue=1, offvalue=0)
-c_reo_auto.place(x=900, y=12)
+c_reo_auto.place(x=960, y=12)
 c_frm_plyr_only = tk.Checkbutton(f_Duplicater, text='仅限对应玩家',variable=frm_plyr_only, onvalue=1, offvalue=0)
-c_frm_plyr_only.place(x=500, y=2)
+c_frm_plyr_only.place(x=560, y=2)
 c_src_plyr = tk.Checkbutton(f_Duplicater, text='转换起始玩家',variable=src_plyr, onvalue=1, offvalue=0, command=player_check)
-c_src_plyr.place(x=400, y=2)
+c_src_plyr.place(x=460, y=2)
 c_tgt_plyr = tk.Checkbutton(f_Duplicater, text='转换目标玩家',variable=tgt_plyr, onvalue=1, offvalue=0, command=player_check)
-c_tgt_plyr.place(x=400, y=30)
+c_tgt_plyr.place(x=460, y=30)
 c_dup_switch = tk.Checkbutton(f_Duplicater, variable=dup_switch, onvalue=1, offvalue=0, command=dup_switch_handle)
-c_dup_switch.place(x=250, y=12)
+c_dup_switch.place(x=310, y=12)
 
 # 标识
 l = tk.Label(f_Duplicater, text='显示序：')
-l.place(x=100, y=14)
+l.place(x=160, y=14)
 
 l2 = tk.Label(f_Duplicater, text='范围：')
-l2.place(x=620, y=5)
+l2.place(x=680, y=5)
 
 l3 = tk.Label(f_Duplicater, text='~')
-l3.place(x=750, y=5)
+l3.place(x=810, y=5)
 
 l4 = tk.Label(f_Duplicater, text='目标：')
-l4.place(x=620, y=30)
+l4.place(x=680, y=30)
 
 # endregion 触发复制
 

@@ -34,16 +34,18 @@ global duplicate_config_string
 global duplicate_config
 
 class DuplicateConfig:
-    def __init__(self,
-                 text_config: List[List[str]],
-				 location_config: List[List[List[int]]]
-                 ):
+	def __init__(self,
+					text_config: List[List[str]],
+					location_config: List[List[List[int]]],
+					object_config: List[List[int]]
+					):
 
-        self.text_config = text_config
-        self.location_config = location_config
+		self.text_config = text_config
+		self.location_config = location_config
+		self.object_config = object_config
 
 openfile = ""
-duplicate_config = DuplicateConfig([],[])
+duplicate_config = DuplicateConfig([],[],[])
 duplicate_config_string = """【方括号标头 + 8 个坐标，若匹配首个坐标，会被复制成其他 7 个坐标】
 0,0
 0,0
@@ -62,6 +64,15 @@ duplicate_config_string = """【方括号标头 + 8 个坐标，若匹配首个�
 <PURPLE>
 <GREY>
 <ORANGE>
+【方括号标头 + ID + 标记，若匹配到首个单位，会被复制成其他 7 个单位】
+1000 - Unit
+1000 - Unit
+1000 - Unit
+1000 - Unit
+1000 - Unit
+1000 - Unit
+1000 - Unit
+1000 - Unit
 """
 current_index = 0
 
@@ -231,6 +242,24 @@ def copy_trigger_per_player_fix(trigger_obj: TriggersObject,
 
 			for cond_x in alter_conditions:
 				cond = new_trigger.conditions[cond_x]
+				for object in duplicate_config.object_config:
+					if object[1] == cond.unit_object:
+						cond.unit_object = object[player]
+				for object in duplicate_config.object_config:
+					if object[1] == cond.next_object:
+						cond.next_object = object[player]
+				for location in duplicate_config.location_config:
+					if location[1][0] == cond.area_1_x and location[1][1] == cond.area_1_y:
+						cond.area_1_x = location[player][0]
+						cond.area_1_y = location[player][1]
+				for location in duplicate_config.location_config:
+					if location[1][0] == cond.area_2_x and location[1][1] == cond.area_2_y:
+						cond.area_2_x = location[player][0]
+						cond.area_2_y = location[player][1]
+				if cond.area_1_x > cond.area_2_x:
+					cond.area_1_x, cond.area_2_x = cond.area_2_x, cond.area_1_x
+				if cond.area_1_y > cond.area_2_y:
+					cond.area_1_y, cond.area_2_y = cond.area_2_y, cond.area_1_y
 				# Player not set
 				if cond.source_player == -1:
 					continue
@@ -246,6 +275,34 @@ def copy_trigger_per_player_fix(trigger_obj: TriggersObject,
 					cond.target_player = Player(player)
 			for effect_x in alter_effects:
 				effect = new_trigger.effects[effect_x]
+				# 文本/坐标优先于玩家判定
+				for text in duplicate_config.text_config:
+					if effect.message.find(text[1]) > 0:
+						effect.message = effect.message.replace(text[1], text[player])
+				for location in duplicate_config.location_config:
+					if location[1][0] == effect.area_1_x and location[1][1] == effect.area_1_y:
+						effect.area_1_x = location[player][0]
+						effect.area_1_y = location[player][1]
+				for location in duplicate_config.location_config:
+					if location[1][0] == effect.area_2_x and location[1][1] == effect.area_2_y:
+						effect.area_2_x = location[player][0]
+						effect.area_2_y = location[player][1]
+				if effect.area_1_x > effect.area_2_x:
+					effect.area_1_x, effect.area_2_x = effect.area_2_x, effect.area_1_x
+				if effect.area_1_y > effect.area_2_y:
+					effect.area_1_y, effect.area_2_y = effect.area_2_y, effect.area_1_y
+				for location in duplicate_config.location_config:
+					if location[1][0] == effect.location_x and location[1][1] == effect.location_y:
+						effect.location_x = location[player][0]
+						effect.location_y = location[player][1]
+				# 单位优先判定
+				for object in duplicate_config.object_config:
+					for (object_enum, object_id) in enumerate(effect.selected_object_ids):
+						if object[1] == object_id:
+							effect.selected_object_ids[object_enum] = object[player]
+				for object in duplicate_config.object_config:
+					if object[1] == effect.location_object_reference:
+						effect.location_object_reference = object[player]
 				# Player not set
 				if effect.source_player == -1:
 					continue
@@ -259,21 +316,6 @@ def copy_trigger_per_player_fix(trigger_obj: TriggersObject,
 				# Change target player
 				if include_player_target:
 					effect.target_player = Player(player)
-				for location in duplicate_config.location_config:
-					if location[1][0] == effect.area_1_x and location[1][1] == effect.area_1_y:
-						effect.area_1_x = location[player][0]
-						effect.area_1_y = location[player][1]
-				for location in duplicate_config.location_config:
-					if location[1][0] == effect.area_2_x and location[1][1] == effect.area_2_y:
-						effect.area_2_x = location[player][0]
-						effect.area_2_y = location[player][1]
-				for location in duplicate_config.location_config:
-					if location[1][0] == effect.location_x and location[1][1] == effect.location_y:
-						effect.location_x = location[player][0]
-						effect.location_y = location[player][1]
-				for text in duplicate_config.text_config:
-					if effect.message.find(text[1]) > 0:
-						effect.message.replace(text[1], text[player])
 
 	return return_dict
 
@@ -439,12 +481,13 @@ ignore_success.set(False)
 # region
 
 def dup_switch_handle():
+	global b_dup
 	if dup_switch.get() == True:
 		b_dup = tk.Button(f_Duplicater, text=f'向下删除 7 条', width=14, height=1, command=multi_remove)
-		b_dup.place(x=280, y=10)
+		b_dup.place(x=340, y=10)
 	else:
 		b_dup = tk.Button(f_Duplicater, text='复制到所有玩家', width=14, height=1, command=duplicate)
-		b_dup.place(x=280, y=10)
+		b_dup.place(x=340, y=10)
 		
 def player_check():
 	if src_plyr.get() == False and tgt_plyr.get() == False:
@@ -515,19 +558,31 @@ def duplicate_config_handle():
 		config_string = t_Configedit.get(1.0,tk.END)
 		duplicate_config.text_config.clear()
 		duplicate_config.location_config.clear()
+		duplicate_config.object_config.clear()
 		while True:
 			try:
+				# 先分割映射组
 				config_group = config_string.split('【')
 				for config_member in config_group:
 					if config_member.strip() != "":
+						# 每个组按换行符分为八项及标头
 						config_list = config_member.split('\n')
 						config_list[0] = '【' + config_list[0]
+						# 有八个逗号则判定为坐标映射
 						if config_member.count(',') == 8:
 							config_line_int = []
 							config_line_int.append(config_list[0])
 							for line in range(1,9):
 								config_line_int.append(list(map(int,config_list[line].split(','))))
 							duplicate_config.location_config.append(config_line_int)
+						# 有八个 - Unit标记则判定为单位映射
+						elif config_member.count('- Unit') == 8:
+							config_line_int = []
+							config_line_int.append(config_list[0])
+							for line in range(1,9):
+								config_line_int.append(int("".join(filter(str.isdigit, config_list[line]))))
+							duplicate_config.object_config.append(config_line_int)
+						# 其余判定为文本映射
 						else:
 							while len(config_list) > 9:
 								config_list.pop()
@@ -547,6 +602,10 @@ def duplicate_config_handle():
 			duplicate_config_string += location[0] + '\n'
 			for i in range(1,9):
 				duplicate_config_string += f'{location[i][0]},{location[i][1]}' + '\n'
+		for object in duplicate_config.object_config:
+			duplicate_config_string += object[0] + '\n'
+			for i in range(1,9):
+				duplicate_config_string += f'{object[i]} - Unit' + '\n'
 
 		w_dup_cfg.quit()
 		w_dup_cfg.destroy()
@@ -607,9 +666,11 @@ reo_auto = tk.IntVar()
 frm_plyr_only = tk.IntVar()
 src_plyr = tk.IntVar()
 tgt_plyr = tk.IntVar()
+self_exclude = tk.IntVar()
 dup_switch =  tk.IntVar()
 src_plyr.set(True)
 dup_switch.set(False)
+self_exclude.set(False)
 
 # 选框
 c_reo_auto = tk.Checkbutton(f_Duplicater, text='自动',variable=reo_auto, onvalue=1, offvalue=0)
@@ -622,6 +683,10 @@ c_tgt_plyr = tk.Checkbutton(f_Duplicater, text='转换目标玩家',variable=tgt
 c_tgt_plyr.place(x=460, y=30)
 c_dup_switch = tk.Checkbutton(f_Duplicater, variable=dup_switch, onvalue=1, offvalue=0, command=dup_switch_handle)
 c_dup_switch.place(x=310, y=12)
+c_exclude = tk.Checkbutton(f_Duplicater, text='唯独排除自身',variable=self_exclude, onvalue=1, offvalue=0, command=player_check)
+c_exclude.place(x=560, y=30)
+c_exclude.config(state='disabled')
+
 
 # 标识
 l = tk.Label(f_Duplicater, text='显示序：')

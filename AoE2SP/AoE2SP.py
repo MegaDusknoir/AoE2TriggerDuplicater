@@ -23,8 +23,6 @@ from tkinter.filedialog import askopenfilename
 from tkinter.filedialog import asksaveasfilename
 
 global scenario
-global scenario_back
-global listfile
 global trigger_manager
 global unit_manager
 global tid
@@ -78,7 +76,6 @@ current_index = 0
 
 def open_scen():
 	global scenario
-	global listfile
 	global trigger_manager
 	global openfile
 
@@ -180,6 +177,7 @@ def copy_trigger_per_player_fix(trigger_obj: TriggersObject,
 								include_player_source=True,
 								include_player_target=False,
 								trigger_ce_lock=None,
+								exclude_self=False,
 								include_gaia: bool = False,
 								create_copy_for_players: List[IntEnum] = None) -> Dict[Player, TriggerObject]:
 	"""
@@ -203,6 +201,9 @@ def copy_trigger_per_player_fix(trigger_obj: TriggersObject,
 			defined)
 		create_copy_for_players (List[IntEnum]): A list of Players to create a copy for. The `from_player` will be
 			excluded from this list.
+
+		exclude_self: If target trigger has a 1 -> 7 or 7 -> 1 effect group, set this to duplicate effects for
+			7 players excluding from_player.
 
 	Returns:
 		A dict with all the new created triggers. The key is the player for which the trigger is
@@ -235,85 +236,108 @@ def copy_trigger_per_player_fix(trigger_obj: TriggersObject,
 	for player in create_copy_for_players:
 		if not player == from_player:
 			new_trigger = trigger_obj.copy_trigger(TS.trigger(trigger))
+			# 移除库函数添加的(copy)后缀
 			if new_trigger.name.endswith(" (copy)"):
 				new_trigger.name = new_trigger.name[:-7]
 			new_trigger.name += f" (p{player})"
 			return_dict[player] = new_trigger
 
+			# 条件遍历
 			for cond_x in alter_conditions:
 				cond = new_trigger.conditions[cond_x]
+				# 起始单位
 				for object in duplicate_config.object_config:
 					if object[1] == cond.unit_object:
 						cond.unit_object = object[player]
+				# 目标单位
 				for object in duplicate_config.object_config:
 					if object[1] == cond.next_object:
 						cond.next_object = object[player]
+				# 目标区域坐标 1
 				for location in duplicate_config.location_config:
 					if location[1][0] == cond.area_1_x and location[1][1] == cond.area_1_y:
 						cond.area_1_x = location[player][0]
 						cond.area_1_y = location[player][1]
+				# 目标区域坐标 2
 				for location in duplicate_config.location_config:
 					if location[1][0] == cond.area_2_x and location[1][1] == cond.area_2_y:
 						cond.area_2_x = location[player][0]
 						cond.area_2_y = location[player][1]
+				# 坐标顺序校正
 				if cond.area_1_x > cond.area_2_x:
 					cond.area_1_x, cond.area_2_x = cond.area_2_x, cond.area_1_x
 				if cond.area_1_y > cond.area_2_y:
 					cond.area_1_y, cond.area_2_y = cond.area_2_y, cond.area_1_y
-				# Player not set
+				# 跳过无玩家条件
 				if cond.source_player == -1:
 					continue
-				# Player not equal to 'from_player'
+				# 跳过非起始玩家条件
 				if change_from_player_only:
 					if not cond.source_player == from_player:
 						continue
-				# Change source player
+				# 改变起始玩家
 				if include_player_source:
 					cond.source_player = Player(player)
-				# Change target player
+				# 改变目标玩家
 				if include_player_target:
 					cond.target_player = Player(player)
+
+			# 效果遍历
 			for effect_x in alter_effects:
 				effect = new_trigger.effects[effect_x]
-				# 文本/坐标优先于玩家判定
+				# 效果文本
 				for text in duplicate_config.text_config:
 					if effect.message.find(text[1]) > 0:
 						effect.message = effect.message.replace(text[1], text[player])
+				# 目标区域坐标 1
 				for location in duplicate_config.location_config:
 					if location[1][0] == effect.area_1_x and location[1][1] == effect.area_1_y:
 						effect.area_1_x = location[player][0]
 						effect.area_1_y = location[player][1]
+				# 目标区域坐标 2
 				for location in duplicate_config.location_config:
 					if location[1][0] == effect.area_2_x and location[1][1] == effect.area_2_y:
 						effect.area_2_x = location[player][0]
 						effect.area_2_y = location[player][1]
+				# 坐标顺序校正
 				if effect.area_1_x > effect.area_2_x:
 					effect.area_1_x, effect.area_2_x = effect.area_2_x, effect.area_1_x
 				if effect.area_1_y > effect.area_2_y:
 					effect.area_1_y, effect.area_2_y = effect.area_2_y, effect.area_1_y
+				# 目标点坐标
 				for location in duplicate_config.location_config:
 					if location[1][0] == effect.location_x and location[1][1] == effect.location_y:
 						effect.location_x = location[player][0]
 						effect.location_y = location[player][1]
-				# 单位优先判定
+				# 选择单位
 				for object in duplicate_config.object_config:
 					for (object_enum, object_id) in enumerate(effect.selected_object_ids):
 						if object[1] == object_id:
 							effect.selected_object_ids[object_enum] = object[player]
+				# 目标点单位
 				for object in duplicate_config.object_config:
 					if object[1] == effect.location_object_reference:
 						effect.location_object_reference = object[player]
-				# Player not set
+				# 跳过无玩家效果
 				if effect.source_player == -1:
 					continue
-				# Player not equal to 'from_player'
+				# 跳过非起始玩家效果
 				if change_from_player_only:
 					if not effect.source_player == from_player:
 						continue
-				# Change source player
+				# 一对多/多对一型效果
+				if exclude_self and effect.source_player == from_player and effect.target_player == Player(player):
+					effect.source_player = Player(player)
+					effect.target_player = from_player
+					continue
+				if exclude_self and effect.target_player == from_player and effect.source_player == Player(player):
+					effect.source_player = from_player
+					effect.target_player = Player(player)
+					continue
+				# 改变起始玩家
 				if include_player_source:
 					effect.source_player = Player(player)
-				# Change target player
+				# 改变目标玩家
 				if include_player_target:
 					effect.target_player = Player(player)
 
@@ -338,6 +362,7 @@ def duplicate():
 		change_from_player_only = frm_plyr_only.get(),
 		include_player_source = src_plyr.get(),
 		include_player_target = tgt_plyr.get(),
+		exclude_self = self_exclude.get(),
 		trigger_select = TriggerSelect.display(idtmp),
 		create_copy_for_players = [1,2,3,4,5,6,7,8]
 		)
@@ -527,15 +552,54 @@ def trigger_detail_handle():
 	t_TriggerDetail.insert(tk.END, trigger_detail)
 	t_TriggerDetail.config(state='disabled')
 	
-	def unit_edit_commit_handle():
+	def trigger_detail_close_handle():
 		w_trigger_detail.quit()
 		w_trigger_detail.destroy()
 
-	b_commit = tk.Button(w_trigger_detail, text='关闭', width=18, height=1, command=unit_edit_commit_handle)
+	b_commit = tk.Button(w_trigger_detail, text='关闭', width=18, height=1, command=trigger_detail_close_handle)
 	b_commit.pack(anchor = 's')
 	
 	w_trigger_detail.grab_set()
 	w_trigger_detail.mainloop()
+
+# Todo			
+def trigger_multiple_add_handle():
+	global tid
+	global trigger_manager
+	try:
+		trigger_id = int(tid.get())
+	except:
+		tk.messagebox.showerror(title='参数不正确', message='参数输入错误，无法识别为整数。')
+		print("\n"
+		"参数输入错误，无法识别为整数。\n")
+		tid.set("")
+		return
+	trigger_detail = trigger_manager.get_trigger_as_string(trigger_select = TriggerSelect.display(trigger_id))
+
+	w_trigger_multiple_add=tk.Toplevel(master=window)
+	w_trigger_multiple_add.title(f'触发批量生成')
+	icotmp = open("_tmp.ico","wb+")
+	icotmp.write(base64.b64decode(img))
+	icotmp.close()
+	w_trigger_multiple_add.iconbitmap("_tmp.ico")
+	w_trigger_multiple_add.geometry('640x480')
+	w_trigger_multiple_add.resizable(width=False, height=False)
+	os.remove("_tmp.ico")
+
+	t_TriggerAdd = tk.scrolledtext.ScrolledText(w_trigger_multiple_add, width=80, height=32)
+	t_TriggerAdd.pack()
+	t_TriggerAdd.delete(1.0,tk.END)
+	t_TriggerAdd.insert(tk.END, trigger_detail)
+	
+	def trigger_multiple_add_commit_handle():
+		w_trigger_multiple_add.quit()
+		w_trigger_multiple_add.destroy()
+
+	b_commit = tk.Button(w_trigger_multiple_add, text='提交', width=18, height=1, command=trigger_multiple_add_commit_handle)
+	b_commit.pack(anchor = 's')
+	
+	w_trigger_multiple_add.grab_set()
+	w_trigger_multiple_add.mainloop()
 
 def duplicate_config_handle():
 	global duplicate_config_string
@@ -568,15 +632,27 @@ def duplicate_config_handle():
 						# 每个组按换行符分为八项及标头
 						config_list = config_member.split('\n')
 						config_list[0] = '【' + config_list[0]
-						# 有八个逗号则判定为坐标映射
-						if config_member.count(',') == 8:
+						map_type = 0x01 + 0x02
+						# 坐标映射校验
+						for i in (1,9):
+							if config_list[i].count(',') != 1:
+								map_type &= ~0x01
+								break
+						# 单位映射校验
+						if not map_type & 0x01:
+							for i in (1,9):
+								if config_list[i].count('- Unit') != 1:
+									map_type &= ~0x02
+									break
+						# 判定坐标映射
+						if map_type & 0x01:
 							config_line_int = []
 							config_line_int.append(config_list[0])
 							for line in range(1,9):
 								config_line_int.append(list(map(int,config_list[line].split(','))))
 							duplicate_config.location_config.append(config_line_int)
-						# 有八个 - Unit标记则判定为单位映射
-						elif config_member.count('- Unit') == 8:
+						# 判定单位映射
+						elif map_type & 0x02:
 							config_line_int = []
 							config_line_int.append(config_list[0])
 							for line in range(1,9):
@@ -683,9 +759,9 @@ c_tgt_plyr = tk.Checkbutton(f_Duplicater, text='转换目标玩家',variable=tgt
 c_tgt_plyr.place(x=460, y=30)
 c_dup_switch = tk.Checkbutton(f_Duplicater, variable=dup_switch, onvalue=1, offvalue=0, command=dup_switch_handle)
 c_dup_switch.place(x=310, y=12)
-c_exclude = tk.Checkbutton(f_Duplicater, text='唯独排除自身',variable=self_exclude, onvalue=1, offvalue=0, command=player_check)
+c_exclude = tk.Checkbutton(f_Duplicater, text='一对七/七对一',variable=self_exclude, onvalue=1, offvalue=0)
 c_exclude.place(x=560, y=30)
-c_exclude.config(state='disabled')
+# c_exclude.config(state='disabled')
 
 
 # 标识

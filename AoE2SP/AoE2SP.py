@@ -107,7 +107,7 @@ def open_scen():
 		except Exception as reason:
 			if len(reason.args) != 0:
 				if reason.args[0] == 'Currently unsupported version. Please read the message above. Thank you.':
-					reason = '场景文件格式过旧，请使用游戏编辑器重新保存场景。'
+					reason = '场景文件格式过旧，请使用游戏编辑器重新保存场景。\n\n——亦或场景文件格式版本过新，请检查当前工具的版本。'
 			tk.messagebox.showerror(title='打开失败', message=f'无法读取场景，原因：\n{reason}')
 			open_success = False
 		except:
@@ -318,13 +318,6 @@ def copy_trigger_per_player_fix(trigger_obj: TriggersObject,
 				for object in duplicate_config.object_config:
 					if object[1] == effect.location_object_reference:
 						effect.location_object_reference = object[player]
-				# 跳过无玩家效果
-				if effect.source_player == -1:
-					continue
-				# 跳过非起始玩家效果
-				if change_from_player_only:
-					if not effect.source_player == from_player:
-						continue
 				# 一对多/多对一型效果
 				if exclude_self and effect.source_player == from_player and effect.target_player == Player(player):
 					effect.source_player = Player(player)
@@ -334,6 +327,22 @@ def copy_trigger_per_player_fix(trigger_obj: TriggersObject,
 					effect.source_player = from_player
 					effect.target_player = Player(player)
 					continue
+				if exclude_self and effect.source_player == Player(player):
+					effect.source_player = from_player
+					continue
+				if exclude_self and effect.target_player == Player(player):
+					effect.target_player = from_player
+					continue
+				# 跳过无玩家效果
+				if effect.source_player == -1:
+					continue
+				# 跳过非起始玩家效果
+				if change_from_player_only:
+					if not (
+						(include_player_source and effect.source_player == from_player)
+						or (include_player_target and effect.target_player == from_player)
+						):
+						continue
 				# 改变起始玩家
 				if include_player_source:
 					effect.source_player = Player(player)

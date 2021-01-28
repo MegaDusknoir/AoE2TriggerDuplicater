@@ -643,13 +643,13 @@ def duplicate_config_handle():
 						config_list[0] = '【' + config_list[0]
 						map_type = 0x01 + 0x02
 						# 坐标映射校验
-						for i in (1,9):
+						for i in range (1,9):
 							if config_list[i].count(',') != 1:
 								map_type &= ~0x01
 								break
 						# 单位映射校验
 						if not map_type & 0x01:
-							for i in (1,9):
+							for i in range (1,9):
 								if config_list[i].count('- Unit') != 1:
 									map_type &= ~0x02
 									break

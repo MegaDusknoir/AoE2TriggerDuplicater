@@ -287,7 +287,7 @@ def copy_trigger_per_player_fix(trigger_obj: TriggersObject,
 				effect = new_trigger.effects[effect_x]
 				# 效果文本
 				for text in duplicate_config.text_config:
-					if effect.message.find(text[1]) > 0:
+					if effect.message.find(text[1]) != -1:
 						effect.message = effect.message.replace(text[1], text[player])
 				# 目标区域坐标 1
 				for location in duplicate_config.location_config:
